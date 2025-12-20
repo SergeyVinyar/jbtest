@@ -29,6 +29,13 @@ class Lexer(private val input: String) {
         Regex("""^->""") to TokenType.T_ARROW,
         Regex("""^=""") to TokenType.T_ASSIGN,
 
+        // Literals and Identifiers
+        // FLOAT and INT combined into T_NUMBER
+        Regex("""^([-]?\d+\.\d*|\d*\.\d+)""") to TokenType.T_NUMBER,
+        Regex("""^[-]?\d+""") to TokenType.T_NUMBER,
+        Regex("""^[a-zA-Z_][a-zA-Z0-9_]*""") to TokenType.T_IDENTIFIER,
+        Regex("""^"([^\\"]|\\.)*"""") to TokenType.T_STRING_LITERAL,
+
         // Single-char Operators
         Regex("""^\+""") to TokenType.PLUS,
         Regex("""^-""") to TokenType.MINUS,
@@ -40,13 +47,6 @@ class Lexer(private val input: String) {
         Regex("""^\{""") to TokenType.LBRACE,
         Regex("""^\}""") to TokenType.RBRACE,
         Regex("""^,""") to TokenType.COMMA,
-
-        // Literals and Identifiers
-        // FLOAT and INT combined into T_NUMBER
-        Regex("""^(\d+\.\d*|\d*\.\d+)""") to TokenType.T_NUMBER,
-        Regex("""^\d+""") to TokenType.T_NUMBER,
-        Regex("""^[a-zA-Z_][a-zA-Z0-9_]*""") to TokenType.T_IDENTIFIER,
-        Regex("""^"([^\\"]|\\.)*"""") to TokenType.T_STRING_LITERAL
     )
 
     fun tokenize(): List<Token> {

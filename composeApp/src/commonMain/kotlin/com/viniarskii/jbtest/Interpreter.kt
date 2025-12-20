@@ -118,7 +118,11 @@ class InterpreterImpl : Interpreter {
             }
 
             is Expression.Identifier -> {
-                scopeVariables[expression.name] ?: throw RuntimeException("Variable ${expression.name} not found")
+                var result = scopeVariables[expression.name] ?: throw RuntimeException("Variable ${expression.name} not found")
+                if (result is Value.Number && expression.unaryMinus) {
+                    result = result.copy(value = -result.value)
+                }
+                result
             }
 
             is Expression.BinaryOp -> {
@@ -174,11 +178,11 @@ class InterpreterImpl : Interpreter {
                 require(startResult is Value.Number)
                 val endResult = end.await()
                 require(endResult is Value.Number)
-                require(startResult.value <= endResult.value) {
-                    "Sequence {${startResult.value}, ${endResult.value}} has end bound < start bound"
-                }
                 require(startResult.value % 1 == 0.0 && endResult.value % 1 == 0.0) {
                     "Sequence {${startResult.value}, ${endResult.value}} has non-integer bound(s)"
+                }
+                require(startResult.value <= endResult.value) {
+                    "Sequence {${startResult.value.toInt()}, ${endResult.value.toInt()}} has end bound < start bound"
                 }
                 Value.Sequence(start = startResult.value.toInt(), end = endResult.value.toInt())
             }

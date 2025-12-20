@@ -7,7 +7,8 @@ sealed interface Expression {
     ) : Expression
 
     data class Identifier(
-        val name: String
+        val name: String,
+        val unaryMinus: Boolean,
     ) : Expression
 
     data class BinaryOp(
@@ -128,8 +129,16 @@ class Parser {
     private fun parsePrimary(): Expression {
         val token = peek() ?: error("Unexpected end of expression")
         return when (token.type) {
+            TokenType.MINUS -> {
+                consume()
+                if (peek()?.type == TokenType.T_IDENTIFIER) {
+                    Expression.Identifier(name = consume().value, unaryMinus = true)
+                } else {
+                    error("Unexpected token ${TokenType.MINUS} in expression")
+                }
+            }
             TokenType.T_NUMBER -> Expression.Number(consume().value.toDouble())
-            TokenType.T_IDENTIFIER -> Expression.Identifier(consume().value)
+            TokenType.T_IDENTIFIER -> Expression.Identifier(name = consume().value, unaryMinus = false)
             TokenType.LPAREN -> {
                 consume()
                 val expression = parseAdditions()
