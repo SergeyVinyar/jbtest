@@ -1,4 +1,4 @@
-package com.viniarskii.jbtest
+package com.viniarskii.jbtest.interpreter
 
 sealed interface Expression {
 
@@ -53,7 +53,14 @@ sealed interface Statement {
     ) : Statement
 }
 
-class Parser {
+interface Parser {
+    fun parse(tokens: List<Token>): List<Statement>
+}
+
+/**
+ * Non thread-safe
+ */
+class ParserImpl : Parser {
     private var current = 0
     private var tokens: List<Token> = listOf()
 
@@ -67,7 +74,7 @@ class Parser {
         return consume()
     }
 
-    fun parse(tokens: List<Token>): List<Statement> {
+    override fun parse(tokens: List<Token>): List<Statement> {
         this.current = 0
         this.tokens = tokens
         return mutableListOf<Statement>().apply {

@@ -1,18 +1,17 @@
-package com.viniarskii.jbtest
+package com.viniarskii.jbtest.interpreter
 
+import androidx.compose.ui.text.AnnotatedString
 import co.touchlab.stately.collections.ConcurrentMutableMap
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
-import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.String
-import kotlin.concurrent.Volatile
 import kotlin.math.pow
 
 sealed interface InterpreterEvent {
@@ -27,54 +26,57 @@ interface Interpreter {
 
     val events: SharedFlow<InterpreterEvent>
 
-    suspend fun interpret(statements: Collection<Statement>): Job
+    suspend fun interpret(input: AnnotatedString)
 }
 
-class InterpreterImpl : Interpreter {
+class InterpreterImpl(
+    private val lexer: Lexer = LexerImpl(), // No DI for simplicity
+    private val parser: Parser = ParserImpl(),
+) : Interpreter {
 
-    @Volatile
-    private var currentJob: Job? = null
-
-    private val eventsMutableFlow = MutableSharedFlow<InterpreterEvent>(replay = 100)
-    override val events: SharedFlow<InterpreterEvent> = eventsMutableFlow.asSharedFlow()
-
-    private val globalVariables: ConcurrentMutableMap<String, Value> = ConcurrentMutableMap()
+    private val _events = MutableSharedFlow<InterpreterEvent>(replay = 100)
+    override val events: SharedFlow<InterpreterEvent> = _events.asSharedFlow()
 
     private suspend fun onEvent(event: InterpreterEvent) {
-        eventsMutableFlow.emit(event)
+        _events.emit(event)
     }
 
-    // region [Interpreter] interface implementation
+    override suspend fun interpret(input: AnnotatedString) = withContext(Dispatchers.Default) {
+        InterpreterRun(
+            lexer = lexer,
+            parser = parser,
+            onEvent = ::onEvent,
+        ).interpret(input)
+    }
+}
 
-    override suspend fun interpret(statements: Collection<Statement>): Job = coroutineScope {
-        launch(Dispatchers.Main) {
-            currentJob?.let {
-                if (it.isActive) {
-                    it.cancelAndJoin()
-                    globalVariables.clear()
-                    eventsMutableFlow.emit(InterpreterEvent.Cancelled)
-                }
+private class InterpreterRun(
+    private val lexer: Lexer,
+    private val parser: Parser,
+    private val onEvent: suspend (InterpreterEvent) -> Unit,
+) {
+    private val globalVariables: ConcurrentMutableMap<String, Value> = ConcurrentMutableMap()
+
+    suspend fun interpret(input: AnnotatedString) {
+        onEvent(InterpreterEvent.Started)
+        try {
+            val tokens = lexer.tokenize(input)
+            val statements = parser.parse(tokens)
+            interpretStatements(statements)
+            onEvent(InterpreterEvent.Completed)
+        } catch (_: CancellationException) {
+            withContext(NonCancellable) {
+                onEvent(InterpreterEvent.Cancelled)
             }
-            eventsMutableFlow.emit(InterpreterEvent.Started)
-            try {
-                interpretStatements(statements)
-            } catch (e: Exception) {
-                eventsMutableFlow.emit(
-                    InterpreterEvent.Error(
-                        message = e.message ?: "Unknown error"
-                    )
-                )
-            } finally {
-                eventsMutableFlow.emit(InterpreterEvent.Completed)
+        } catch (e: Exception) {
+            withContext(NonCancellable) {
+                onEvent(InterpreterEvent.Error(message = e.message ?: "Unknown error"))
+                onEvent(InterpreterEvent.Completed)
             }
-        }.also {
-            currentJob = it
         }
     }
 
-    // endregion [Interpreter] interface implementation
-
-    suspend fun interpretStatements(statements: Collection<Statement>) = withContext(Dispatchers.Default) {
+    suspend fun interpretStatements(statements: Collection<Statement>) {
         statements.forEach { statement ->
             interpretStatement(statement)
         }

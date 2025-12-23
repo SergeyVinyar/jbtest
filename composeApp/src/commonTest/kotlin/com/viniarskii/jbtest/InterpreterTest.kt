@@ -1,5 +1,8 @@
 package com.viniarskii.jbtest
 
+import androidx.compose.ui.text.AnnotatedString
+import com.viniarskii.jbtest.interpreter.InterpreterEvent
+import com.viniarskii.jbtest.interpreter.InterpreterImpl
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.coroutineScope
@@ -284,12 +287,12 @@ class InterpreterTest {
         expectedOutput: String,
     ) {
         Dispatchers.setMain(Dispatchers.Unconfined)
-        val tokens = Lexer(input.trimIndent()).tokenize()
-        val statements = Parser().parse(tokens)
         val interpreter = InterpreterImpl()
         runTest {
             coroutineScope {
-                interpreter.interpret(statements)
+                with(interpreter) {
+                    interpret(AnnotatedString(input.trimIndent()))
+                }
                 val actualOutput = interpreter.events
                     .takeWhile { it !is InterpreterEvent.Completed && it !is InterpreterEvent.Cancelled }
                     .mapNotNull { event ->

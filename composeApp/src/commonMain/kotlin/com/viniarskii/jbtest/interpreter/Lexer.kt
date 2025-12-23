@@ -1,4 +1,6 @@
-package com.viniarskii.jbtest
+package com.viniarskii.jbtest.interpreter
+
+import androidx.compose.ui.text.AnnotatedString
 
 enum class TokenType {
     T_VAR, T_OUT, T_PRINT, T_MAP, T_REDUCE,
@@ -11,7 +13,14 @@ enum class TokenType {
 
 data class Token(val type: TokenType, val value: String)
 
-class Lexer(private val input: String) {
+interface Lexer {
+    fun tokenize(input: AnnotatedString): List<Token>
+}
+
+/**
+ * Non thread-safe
+ */
+class LexerImpl : Lexer {
     private var current = 0
 
     private val rules = listOf(
@@ -49,7 +58,8 @@ class Lexer(private val input: String) {
         Regex("""^,""") to TokenType.COMMA,
     )
 
-    fun tokenize(): List<Token> {
+    override fun tokenize(input: AnnotatedString): List<Token> {
+        current = 0
         val tokens = mutableListOf<Token>()
 
         while (current < input.length) {
@@ -77,6 +87,7 @@ class Lexer(private val input: String) {
                 current++
             }
         }
+
         return tokens
     }
 }
