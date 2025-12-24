@@ -30,8 +30,8 @@ interface Interpreter {
 }
 
 class InterpreterImpl(
-    private val lexer: Lexer = LexerImpl(), // No DI for simplicity
-    private val parser: Parser = ParserImpl(),
+    private val lexerProvider: () -> Lexer = { LexerImpl() }, // No DI for simplicity
+    private val parserProvider: () -> Parser = { ParserImpl() },
 ) : Interpreter {
 
     private val _events = MutableSharedFlow<InterpreterEvent>(replay = 100)
@@ -43,8 +43,8 @@ class InterpreterImpl(
 
     override suspend fun interpret(input: AnnotatedString) = withContext(Dispatchers.Default) {
         InterpreterRun(
-            lexer = lexer,
-            parser = parser,
+            lexer = lexerProvider(),
+            parser = parserProvider(),
             onEvent = ::onEvent,
         ).interpret(input)
     }
@@ -120,9 +120,17 @@ private class InterpreterRun(
             }
 
             is Expression.Identifier -> {
-                var result = scopeVariables[expression.name] ?: throw RuntimeException("Variable ${expression.name} not found")
-                if (result is Value.Number && expression.unaryMinus) {
-                    result = result.copy(value = -result.value)
+                var result = scopeVariables[expression.name]
+                    ?: throw RuntimeException("Variable ${expression.name} not found")
+                if (expression.unaryMinus) {
+                    result = when (result) {
+                        is Value.Number -> result.copy(value = -result.value)
+                        // For uniformity only as we don't support string literals as expressions
+                        is Value.Str -> result.copy(value = "-${result.value})")
+                        // Do we need to exchange start and end? Let's assume, yes
+                        // Otherwise, it'll almost always be generating an invalid sequence (start < end)
+                        is Value.Sequence -> result.copy(start = -result.end, end = -result.start)
+                    }
                 }
                 result
             }

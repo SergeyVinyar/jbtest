@@ -69,8 +69,8 @@ class ParserImpl : Parser {
     private fun consume() = tokens[current++]
 
     private fun expect(type: TokenType): Token {
-        val t = peek() ?: error("Expected $type, but reached end of input")
-        if (t.type != type) error("Expected $type but found ${t.type}")
+        val t = peek() ?: error("Expected ${type.readableName}, but reached end of input")
+        if (t.type != type) error("Expected ${type.readableName} but found ${t.type.readableName}")
         return consume()
     }
 
@@ -93,16 +93,27 @@ class ParserImpl : Parser {
                 expect(TokenType.T_ASSIGN)
                 Statement.Var(identifier, parseAdditions())
             }
+
             TokenType.T_OUT -> {
                 expect(TokenType.T_OUT)
                 Statement.Out(parseAdditions())
             }
+
             TokenType.T_PRINT -> {
                 expect(TokenType.T_PRINT)
                 val text = consume().value
                 Statement.Print(text.substring(1, text.length - 1))
             }
-            else -> error("Expected statement, found ${token.type}")
+
+            else -> {
+                // I'm always typing "val" instead of "var" automatically and struggling to understand
+                // why it's not working
+                if (token.type == TokenType.T_IDENTIFIER && token.value == "val") {
+                    error("Expected statement, found ${token.type.readableName} \"${token.value}\". Did you mean \"var\"?")
+                } else {
+                    error("Expected statement, found ${token.type.readableName} \"${token.value}\"")
+                }
+            }
         }
     }
 
@@ -141,7 +152,7 @@ class ParserImpl : Parser {
                 if (peek()?.type == TokenType.T_IDENTIFIER) {
                     Expression.Identifier(name = consume().value, unaryMinus = true)
                 } else {
-                    error("Unexpected token ${TokenType.MINUS} in expression")
+                    error("Unexpected token ${TokenType.MINUS.readableName} in expression")
                 }
             }
             TokenType.T_NUMBER -> Expression.Number(consume().value.toDouble())
@@ -155,7 +166,7 @@ class ParserImpl : Parser {
             TokenType.LBRACE -> parseSequence()
             TokenType.T_MAP -> parseMap()
             TokenType.T_REDUCE -> parseReduce()
-            else -> error("Unexpected token ${token.type} in expression")
+            else -> error("Unexpected token ${token.type.readableName} in expression")
         }
     }
 

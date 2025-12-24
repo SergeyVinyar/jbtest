@@ -2,13 +2,29 @@ package com.viniarskii.jbtest.interpreter
 
 import androidx.compose.ui.text.AnnotatedString
 
-enum class TokenType {
-    T_VAR, T_OUT, T_PRINT, T_MAP, T_REDUCE,
-    T_ARROW, T_ASSIGN,
-    PLUS, MINUS, MULTIPLY, DIVIDE, POWER,
-    LPAREN, RPAREN, LBRACE, RBRACE, COMMA,
-    T_NUMBER, T_IDENTIFIER, T_STRING_LITERAL,
-    WHITESPACE, ERROR
+enum class TokenType(val readableName: String) {
+    T_VAR("<var>"),
+    T_OUT("<out>"),
+    T_PRINT("<print>"),
+    T_MAP("<map>"),
+    T_REDUCE("<reduce>"),
+    T_ARROW("\"->\""),
+    T_ASSIGN("\"=\""),
+    PLUS("\"+\""),
+    MINUS("\"-\""),
+    MULTIPLY("\"*\""),
+    DIVIDE("\"\\\""),
+    POWER("\"^\""),
+    LPAREN("\"(\""),
+    RPAREN("\")\""),
+    LBRACE("\"{\""),
+    RBRACE("\"}\""),
+    COMMA("\",\""),
+    T_NUMBER("number"),
+    T_IDENTIFIER("identifier"),
+    T_STRING_LITERAL("string_literal"),
+    WHITESPACE("whitespace"),
+    ERROR("ERROR")
 }
 
 data class Token(val type: TokenType, val value: String)
