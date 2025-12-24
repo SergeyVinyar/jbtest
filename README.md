@@ -1,48 +1,29 @@
-This is a Kotlin Multiplatform project targeting Android, iOS, Desktop (JVM).
+This is a Kotlin Multiplatform project targeting Android, iOS, Desktop (JVM) that implements
+an interpreter for a made-up simple programming language.
+It supports numeric and string literals, global and local variables, sequences, and lambdas. 
+It may also execute arithmetic operations, map / reduce logic for sequences, and print string literals.  
 
-* [/composeApp](./composeApp/src) is for code that will be shared across your Compose Multiplatform applications.
-  It contains several subfolders:
-  - [commonMain](./composeApp/src/commonMain/kotlin) is for code that’s common for all targets.
-  - Other folders are for Kotlin code that will be compiled for only the platform indicated in the folder name.
-    For example, if you want to use Apple’s CoreCrypto for the iOS part of your Kotlin app,
-    the [iosMain](./composeApp/src/iosMain/kotlin) folder would be the right place for such calls.
-    Similarly, if you want to edit the Desktop (JVM) specific part, the [jvmMain](./composeApp/src/jvmMain/kotlin)
-    folder is the appropriate location.
+There are some limitations:
+* sequences may only consist of integers;
+* unary minuses work only with numeric literals and variables (of numeric and sequence types);
+* [reduce] uses Divide-And-Conquer approach that gives wrong results for complicated lambda logic.
 
-* [/iosApp](./iosApp/iosApp) contains iOS applications. Even if you’re sharing your UI with Compose Multiplatform,
-  you need this entry point for your iOS app. This is also where you should add SwiftUI code for your project.
+Interpretation logic consists of three steps:
+* [Lexer] that converts an input string into a list of tokens (no syntax checks at this point);
+* [Parser] that converts a list of tokens into an Abstract Syntax Tree (AST);
+* [Interpreter] that calculate the result based on the given AST.
 
-### Build and Run Android Application
+Technically, we can implement an interpreter that works directly with the list of tokens. But this
+approach limits heavily the usage of multithreading whereas "parsing" the AST makes it possible
+to interpret all the left/right sides of binary operations, and lambdas concurrently.
 
-To build and run the development version of the Android app, use the run configuration from the run widget
-in your IDE’s toolbar or build it directly from the terminal:
-- on macOS/Linux
-  ```shell
-  ./gradlew :composeApp:assembleDebug
-  ```
-- on Windows
-  ```shell
-  .\gradlew.bat :composeApp:assembleDebug
-  ```
+The lexer here uses regexps for processing input strings. Apparently, that's not the best approach
+from the performance perspective. The production code should use formal language grammar
+and tools for generating parsers/lexers like [Bison](https://www.gnu.org/software/bison/) 
+and [Flex](https://github.com/westes/flex). But these tools generate not very human readable code.
 
-### Build and Run Desktop (JVM) Application
+Also as a follow-up, [Lexer], [Parser] and [Interpreter] can be linked via flows instead of lists/trees. 
+It allows processing the input string lazily. For example, no need for [Lexer] to parse 
+the input further if [Parser] has already found a syntax error.
 
-To build and run the development version of the desktop app, use the run configuration from the run widget
-in your IDE’s toolbar or run it directly from the terminal:
-- on macOS/Linux
-  ```shell
-  ./gradlew :composeApp:run
-  ```
-- on Windows
-  ```shell
-  .\gradlew.bat :composeApp:run
-  ```
-
-### Build and Run iOS Application
-
-To build and run the development version of the iOS app, use the run configuration from the run widget
-in your IDE’s toolbar or open the [/iosApp](./iosApp) directory in Xcode and run it from there.
-
----
-
-Learn more about [Kotlin Multiplatform](https://www.jetbrains.com/help/kotlin-multiplatform-dev/get-started.html)…
+A short video is [here](https://drive.google.com/file/d/1S-oBfrBYh2xlr20MUO5_OSrGuB_ZuBrc/view?usp=sharing).

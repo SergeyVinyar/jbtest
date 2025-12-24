@@ -22,7 +22,7 @@ fun App() {
                     WindowInsets.safeContent
                         // Okay, let's ignore horizontal insets
                         // because it doesn't look nice.
-                        // In reality, it need to be covered in design.
+                        // In reality, it needs to be covered in design.
                         .only(WindowInsetsSides.Vertical)
                 )
         ) {

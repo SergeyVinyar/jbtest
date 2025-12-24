@@ -38,26 +38,40 @@ class MainScreenViewModel(
     @Volatile
     private var _currentInterpreterJob: Job? = null
 
+    /**
+     * Queue for interpretation requests.
+     *
+     * For debouncing and making sure we don't get a mixture of outputs from
+     * different versions of inputs.
+     */
     private val _interpretationQueue = MutableSharedFlow<AnnotatedString>(
         extraBufferCapacity = 1,
         onBufferOverflow = BufferOverflow.DROP_OLDEST,
     ).also { flow ->
+        // [viewModelScope] for cancelling interpretation if user navigates away of this screen.
         viewModelScope.launch(Dispatchers.Default.limitedParallelism(1)) {
             flow.debounce(300.milliseconds).collect { input ->
+                // We don't need to use any special synchronisation here because of [limitedParallelism(1)].
+                // But we still need to mark [_currentInterpreterJob] as [volatile] because
+                // [limitedParallelism(1)] means "no more than one thread runs this block at any given moment of time",
+                // but these can still be different system threads (even on every suspend-function
+                // invocation the thread may be changed).
                 _currentInterpreterJob?.let { job ->
                     if (job.isActive) {
                         job.cancelAndJoin()
                     }
                 }
                 _currentInterpreterJob = launch {
-                    interpreter.interpret(input)
+                    interpreter.interpret(input) // [interpret] switches to [Dispatchers.Default]
                 }
             }
         }
     }
 
     init {
-        viewModelScope.launch {
+        // This [collect] just emits new UI states. It doesn't change UI directly so
+        // using [Dispatchers.Default] is preferable.
+        viewModelScope.launch(Dispatchers.Default) {
             interpreter.events.collect { event ->
                 newState {
                     when (event) {
@@ -103,6 +117,9 @@ class MainScreenViewModel(
     }
 
     fun onInputChanged(newTextFieldValue: TextFieldValue) {
+        // [TextFieldValue] also contains the cursor position +
+        // an internal [AnnotatedString] that may have changed because of (not implemented)
+        // syntax highlighting. We don't need to trigger interpretation is such cases.
         val needReinterpretation = newTextFieldValue.text != uiState.value.input.text
         newState {
             copy(input = newTextFieldValue)
@@ -122,7 +139,7 @@ class MainScreenViewModel(
     data class UiState(
         val input: TextFieldValue = TextFieldValue(),
         val output: ImmutableList<UiMessage> = persistentListOf(),
-        val isInProgress: Boolean = false,
+        val isInProgress: Boolean = false, // A small circular progress widget
     )
 
     @Immutable

@@ -34,7 +34,9 @@ interface Lexer {
 }
 
 /**
- * Non thread-safe
+ * Converts input string into a list of tokens. No syntax validation here.
+ *
+ * Not thread-safe.
  */
 class LexerImpl : Lexer {
     private var current = 0

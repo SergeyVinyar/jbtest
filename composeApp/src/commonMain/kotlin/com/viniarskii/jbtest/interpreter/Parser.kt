@@ -58,7 +58,10 @@ interface Parser {
 }
 
 /**
- * Non thread-safe
+ * Converts a list of tokens into an Abstract Syntax Tree (AST).
+ * Here we check for syntax correctness.
+ *
+ * Not thread-safe.
  */
 class ParserImpl : Parser {
     private var current = 0
@@ -117,6 +120,9 @@ class ParserImpl : Parser {
         }
     }
 
+    // We go down the "tree" to the very bottom (additions -> multiplications -> powers)
+    // and then start making nodes moving upward. So that we keep the required operations
+    // precedence
     private fun parseAdditions(): Expression {
         var node = parseMultiplication()
         while (peek()?.type in listOf(TokenType.PLUS, TokenType.MINUS)) {

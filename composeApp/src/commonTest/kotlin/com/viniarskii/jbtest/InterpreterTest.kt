@@ -38,6 +38,27 @@ class InterpreterTest {
     )
 
     @Test
+    fun sequenceVariableUnaryOperators() = doTest(
+        input = """
+            var x = {1, 2}
+            out -x
+        """,
+        expectedOutput = """
+            {-2, -1}
+        """
+    )
+
+    // Not supported
+//    @Test
+//    fun expressionUnaryOperators() = doTest(
+//        input = """
+//            out -(1 + 2)
+//        """,
+//        expectedOutput = """
+//        """
+//    )
+
+    @Test
     fun parenthesesAndFloatingPoint() {
         doTest(
             input = """

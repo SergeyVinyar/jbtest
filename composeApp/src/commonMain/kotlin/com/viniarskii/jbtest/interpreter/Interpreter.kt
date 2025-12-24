@@ -14,14 +14,44 @@ import kotlinx.coroutines.withContext
 import kotlin.String
 import kotlin.math.pow
 
+/**
+ * Interpreter events.
+ * UI shows them as output as soon as it gets a new event.
+ */
 sealed interface InterpreterEvent {
+
+    /**
+     * Interpretation started
+     */
     object Started : InterpreterEvent
+
+    /**
+     * Interpretation completed
+     */
     object Completed : InterpreterEvent
+
+    /**
+     * Interpretation cancelled (actually, a coroutine is cancelled)
+     */
     object Cancelled : InterpreterEvent
+
+    /**
+     * New message to be added to output
+     */
     data class Output(val message: String) : InterpreterEvent
+
+    /**
+     * New error to be added to output
+     */
     data class Error(val message: String) : InterpreterEvent
 }
 
+/**
+ * Interpreter.
+ *
+ * Made as interface just to reflect the need to use DI and unit-testing for every class.
+ * But we don't have DI in this project.
+ */
 interface Interpreter {
 
     val events: SharedFlow<InterpreterEvent>
@@ -30,10 +60,13 @@ interface Interpreter {
 }
 
 class InterpreterImpl(
+    // Lexer and parser are not thread-safe, so we create new instances every time
+    // as a fool-proof against bugs in multi-threading on a view model's side.
     private val lexerProvider: () -> Lexer = { LexerImpl() }, // No DI for simplicity
     private val parserProvider: () -> Parser = { ParserImpl() },
 ) : Interpreter {
 
+    // [replay] is for unit-tests. In reality, need to think better.
     private val _events = MutableSharedFlow<InterpreterEvent>(replay = 100)
     override val events: SharedFlow<InterpreterEvent> = _events.asSharedFlow()
 
@@ -41,6 +74,10 @@ class InterpreterImpl(
         _events.emit(event)
     }
 
+    // [AnnotatedString] instead of [String] to prepare for syntax/bugs highlighting
+    // of the source code in the future.
+    // Doesn't matter here (it's more for the view model) but let's have same types everywhere
+    // and avoid any casting AnnotatedString <-> String.
     override suspend fun interpret(input: AnnotatedString) = withContext(Dispatchers.Default) {
         InterpreterRun(
             lexer = lexerProvider(),
@@ -55,6 +92,10 @@ private class InterpreterRun(
     private val parser: Parser,
     private val onEvent: suspend (InterpreterEvent) -> Unit,
 ) {
+    /**
+     * Global variables (that are introduced on a statement level).
+     * All expressions have access to them as soon as they are defined.
+     */
     private val globalVariables: ConcurrentMutableMap<String, Value> = ConcurrentMutableMap()
 
     suspend fun interpret(input: AnnotatedString) {
@@ -127,8 +168,8 @@ private class InterpreterRun(
                         is Value.Number -> result.copy(value = -result.value)
                         // For uniformity only as we don't support string literals as expressions
                         is Value.Str -> result.copy(value = "-${result.value})")
-                        // Do we need to exchange start and end? Let's assume, yes
-                        // Otherwise, it'll almost always be generating an invalid sequence (start < end)
+                        // Do we need to exchange start and end? Let's assume, yes.
+                        // Otherwise, it'll almost always be generating an invalid sequence (start < end).
                         is Value.Sequence -> result.copy(start = -result.end, end = -result.start)
                     }
                 }
@@ -170,6 +211,7 @@ private class InterpreterRun(
             }
 
             is Expression.Map -> {
+                // For [map], we are fine to calculate just new start and end bounds
                 val sequenceResult = interpretExpression(expression.sequence, scopeVariables)
                 require(sequenceResult is Value.Sequence)
                 val start = async {
@@ -198,6 +240,17 @@ private class InterpreterRun(
             }
 
             is Expression.Reduce -> {
+                // Actually, cool but not very working in real life solution.
+                // I use here a Divide And Conquer approach:
+                // all lambda invocations are divided by halves
+                // (+ one with a neutral value) and then are joined.
+                // It allows us to significantly reduce the number of steps (O(n) -> O(log(n))).
+                // For example, map({1, 1000000}, 0, x y -> x + y) requires ~20 steps
+                // instead of ~1000000.
+                // It's clearly visible in unit tests (9 seconds in a unit test, 1 second in an app).
+                // The problem is that if lambda does something more complicated that just
+                // a simple +/-, joining gives wrong result.
+                // We can discuss it.
                 val sequence = async { interpretExpression(expression.sequence, scopeVariables) }
                 val neutral = async { interpretExpression(expression.neutral, scopeVariables) }
                 val sequenceResult = sequence.await()
@@ -216,6 +269,7 @@ private class InterpreterRun(
                         scopeVariables = scopeVariables,
                     )
                 }
+                // Second step (dividing by halves and joining results for all sequence elements)
                 val right = async {
                     reduceRecursion(
                         start = sequenceResult.start,
@@ -229,6 +283,7 @@ private class InterpreterRun(
                 val leftResult = left.await()
                 require(leftResult is Value.Number)
                 val rightResult = right.await()
+                // Third step (joining neutral value result and results for all sequence elements)
                 if (rightResult != null) {
                     interpretReduceLambda(
                         identifier1 = expression.identifier1,
@@ -245,7 +300,9 @@ private class InterpreterRun(
         }
     }
 
-    // Divide and Conquer
+    // Divide and Conquer logic.
+    // Recursion is not a problem here because it uses suspend functions,
+    // so no risk of stack overflow.
     private suspend fun reduceRecursion(
         start: Int,
         end: Int,
@@ -328,6 +385,9 @@ private class InterpreterRun(
         return result
     }
 
+    /**
+     * Node interpretation result
+     */
     sealed interface Value {
         data class Number(val value: Double) : Value
         data class Str(val value: String) : Value
