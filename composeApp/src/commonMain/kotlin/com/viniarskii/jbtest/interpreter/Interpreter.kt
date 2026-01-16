@@ -6,6 +6,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -136,7 +137,12 @@ private class InterpreterRun(
                         message = when (result) {
                             is Value.Number -> result.value.toString()
                             is Value.Str -> result.value
-                            is Value.Sequence -> "{${result.start}, ${result.end}}"
+                            is Value.Sequence -> result.elements.joinToString(
+                                prefix = "[",
+                                separator = ", ",
+                                postfix = "]",
+                                transform = { it.toString() }
+                            )
                         }
                     )
                 )
@@ -160,20 +166,17 @@ private class InterpreterRun(
                 Value.Number(expression.value)
             }
 
-            is Expression.Identifier -> {
-                var result = scopeVariables[expression.name]
-                    ?: throw RuntimeException("Variable ${expression.name} not found")
-                if (expression.unaryMinus) {
-                    result = when (result) {
-                        is Value.Number -> result.copy(value = -result.value)
-                        // For uniformity only as we don't support string literals as expressions
-                        is Value.Str -> result.copy(value = "-${result.value})")
-                        // Do we need to exchange start and end? Let's assume, yes.
-                        // Otherwise, it'll almost always be generating an invalid sequence (start < end).
-                        is Value.Sequence -> result.copy(start = -result.end, end = -result.start)
-                    }
+            is Expression.UnaryMinus -> {
+                when (val result = interpretExpression(expression.value, scopeVariables)) {
+                    is Value.Number -> Value.Number(value = -result.value)
+                    is Value.Sequence -> Value.Sequence(elements = result.elements.map { -it })
+                    is Value.Str -> Value.Str(value = "-${result.value}")
                 }
-                result
+            }
+
+            is Expression.Identifier -> {
+                scopeVariables[expression.name]
+                    ?: throw RuntimeException("Variable ${expression.name} not found")
             }
 
             is Expression.BinaryOp -> {
@@ -204,122 +207,100 @@ private class InterpreterRun(
                 require(startResult.value % 1 == 0.0 && endResult.value % 1 == 0.0) {
                     "Sequence {${startResult.value}, ${endResult.value}} has non-integer bound(s)"
                 }
-                require(startResult.value.toInt() <= endResult.value.toInt()) {
-                    "Sequence {${startResult.value.toInt()}, ${endResult.value.toInt()}} has end bound < start bound"
+                val startResultAsInt = startResult.value.toInt()
+                val endResultAsInt = endResult.value.toInt()
+                require(startResultAsInt <= endResultAsInt) {
+                    "Sequence {$startResultAsInt, $endResultAsInt} has end bound < start bound"
                 }
-                Value.Sequence(start = startResult.value.toInt(), end = endResult.value.toInt())
+                // 1. Would concurrency here be a performance improvement? I doubt. Likely the opposite.
+                // 2. Also not using DoubleArray because most likely, we'll be using these elements
+                //    for map or reduce which box them again. Let them be boxed here.
+                Value.Sequence(
+                    elements = List(endResultAsInt - startResultAsInt + 1) { index ->
+                        startResultAsInt.toDouble() + index
+                    }
+                )
             }
 
             is Expression.Map -> {
-                // For [map], we are fine to calculate just new start and end bounds
                 val sequenceResult = interpretExpression(expression.sequence, scopeVariables)
                 require(sequenceResult is Value.Sequence)
-                val start = async {
-                    val lambdaVariables: ConcurrentMutableMap<String, Value> = ConcurrentMutableMap()
-                    lambdaVariables.putAll(scopeVariables)
-                    lambdaVariables[expression.param] = Value.Number(sequenceResult.start.toDouble())
-                    interpretExpression(expression.lambda, lambdaVariables)
+                val mappedElements = sequenceResult.elements.map { sourceElement ->
+                    async {
+                        val lambdaVariables: ConcurrentMutableMap<String, Value> = ConcurrentMutableMap()
+                        lambdaVariables.putAll(scopeVariables)
+                        lambdaVariables[expression.param] = Value.Number(sourceElement)
+                        interpretExpression(expression.lambda, lambdaVariables)
+                    }
+                }.awaitAll().map {
+                    require(it is Value.Number) { "$expression returned non-double element '$it'" }
+                    it.value
                 }
-                val end = async {
-                    val lambdaVariables: ConcurrentMutableMap<String, Value> = ConcurrentMutableMap()
-                    lambdaVariables.putAll(scopeVariables)
-                    lambdaVariables[expression.param] = Value.Number(sequenceResult.end.toDouble())
-                    interpretExpression(expression.lambda, lambdaVariables)
-                }
-                val startResult = start.await()
-                require(startResult is Value.Number)
-                val endResult = end.await()
-                require(endResult is Value.Number)
-                require(startResult.value % 1 == 0.0 && endResult.value % 1 == 0.0) {
-                    "Sequence {${startResult.value}, ${endResult.value}} has non-integer bound(s)"
-                }
-                require(startResult.value <= endResult.value) {
-                    "Sequence {${startResult.value.toInt()}, ${endResult.value.toInt()}} has end bound < start bound"
-                }
-                Value.Sequence(start = startResult.value.toInt(), end = endResult.value.toInt())
+                Value.Sequence(elements = mappedElements)
             }
 
             is Expression.Reduce -> {
-                // Actually, cool but not very working in real life solution.
-                // I use here a Divide And Conquer approach:
-                // all lambda invocations are divided by halves
-                // (+ one with a neutral value) and then are joined.
-                // It allows us to significantly reduce the number of steps (O(n) -> O(log(n))).
-                // For example, map({1, 1000000}, 0, x y -> x + y) requires ~20 steps
-                // instead of ~1000000.
-                // It's clearly visible in unit tests (9 seconds in a unit test, 1 second in an app).
-                // The problem is that if lambda does something more complicated that just
-                // a simple +/-, joining gives wrong result.
-                // We can discuss it.
                 val sequence = async { interpretExpression(expression.sequence, scopeVariables) }
                 val neutral = async { interpretExpression(expression.neutral, scopeVariables) }
                 val sequenceResult = sequence.await()
                 require(sequenceResult is Value.Sequence)
-                require(sequenceResult.start <= sequenceResult.end)
                 val neutralResult = neutral.await()
                 require(neutralResult is Value.Number)
-                // First step (with neutral)
-                val left = async {
-                    interpretReduceLambda(
-                        identifier1 = expression.identifier1,
-                        identifier2 = expression.identifier2,
-                        argumentValue1 = neutralResult.value,
-                        argumentValue2 = sequenceResult.start.toDouble(),
-                        lambda = expression.lambda,
-                        scopeVariables = scopeVariables,
-                    )
-                }
-                // Second step (dividing by halves and joining results for all sequence elements)
-                val right = async {
+                if (expression.lambda.isAssociative) {
+                    // Divide And Conquer approach
+                    val elementsWithNeutralValue: List<Double> = ArrayList(sequenceResult.elements).apply {
+                        add(0, neutralResult.value)
+                    }
                     reduceRecursion(
-                        start = sequenceResult.start,
-                        end = sequenceResult.end,
+                        elements = elementsWithNeutralValue,
+                        startIndex = 0,
+                        endIndex = elementsWithNeutralValue.lastIndex,
                         identifier1 = expression.identifier1,
                         identifier2 = expression.identifier2,
                         lambda = expression.lambda,
                         scopeVariables = scopeVariables
                     )
-                }
-                val leftResult = left.await()
-                require(leftResult is Value.Number)
-                val rightResult = right.await()
-                // Third step (joining neutral value result and results for all sequence elements)
-                if (rightResult != null) {
-                    interpretReduceLambda(
-                        identifier1 = expression.identifier1,
-                        identifier2 = expression.identifier2,
-                        argumentValue1 = leftResult.value,
-                        argumentValue2 = rightResult.value,
-                        lambda = expression.lambda,
-                        scopeVariables = scopeVariables,
-                    )
                 } else {
-                    leftResult
+                    // Non-concurrent approach
+                    Value.Number(
+                        value = sequenceResult.elements.fold(neutralResult.value) { acc, element ->
+                            val lambdaVariables: ConcurrentMutableMap<String, Value> = ConcurrentMutableMap()
+                            lambdaVariables.putAll(scopeVariables)
+                            lambdaVariables[expression.identifier1] = Value.Number(acc)
+                            lambdaVariables[expression.identifier2] = Value.Number(element)
+                            val result = interpretExpression(expression.lambda, lambdaVariables)
+                            require(result is Value.Number) {
+                                "Lambda ${expression.lambda} returned non-double value '$result'"
+                            }
+                            result.value
+                        }
+                    )
                 }
             }
         }
     }
 
     // Divide and Conquer logic.
-    // Recursion is not a problem here because it uses suspend functions,
+
     // so no risk of stack overflow.
     private suspend fun reduceRecursion(
-        start: Int,
-        end: Int,
+        elements: List<Double>,
+        startIndex: Int,
+        endIndex: Int,
         identifier1: String,
         identifier2: String,
         lambda: Expression,
         scopeVariables: Map<String, Value>
-    ): Value.Number? = coroutineScope {
-        require(end >= start)
-        when (end - start) {
-            0 -> null
+    ): Value.Number = coroutineScope {
+        require(endIndex >= startIndex)
+        when (endIndex - startIndex) {
+            0 -> Value.Number(value = elements[startIndex])
             1 -> {
                 val result = interpretReduceLambda(
                     identifier1 = identifier1,
                     identifier2 = identifier2,
-                    argumentValue1 = start.toDouble(),
-                    argumentValue2 = end.toDouble(),
+                    argumentValue1 = elements[startIndex],
+                    argumentValue2 = elements[endIndex],
                     lambda = lambda,
                     scopeVariables = scopeVariables,
                 )
@@ -327,11 +308,12 @@ private class InterpreterRun(
                 result
             }
             else -> {
-                val middle = (start + end) / 2
+                val middleIndex = startIndex + (endIndex - startIndex) / 2
                 val left = async {
                     reduceRecursion(
-                        start = start,
-                        end = middle,
+                        elements = elements,
+                        startIndex = startIndex,
+                        endIndex = middleIndex,
                         identifier1 = identifier1,
                         identifier2 = identifier2,
                         lambda = lambda,
@@ -340,30 +322,25 @@ private class InterpreterRun(
                 }
                 val right = async {
                     reduceRecursion(
-                        start = middle,
-                        end = end,
+                        elements = elements,
+                        startIndex = middleIndex + 1,
+                        endIndex = endIndex,
                         identifier1 = identifier1,
                         identifier2 = identifier2,
                         lambda = lambda,
                         scopeVariables = scopeVariables
                     )
                 }
-                val leftResult = left.await()
-                val rightResult = right.await()
-                if (leftResult != null && rightResult != null) {
-                    val result = interpretReduceLambda(
-                        identifier1 = identifier1,
-                        identifier2 = identifier2,
-                        argumentValue1 = leftResult.value,
-                        argumentValue2 = rightResult.value,
-                        lambda = lambda,
-                        scopeVariables = scopeVariables,
-                    )
-                    require(result is Value.Number)
-                    result
-                } else {
-                    leftResult ?: rightResult
-                }
+                val result = interpretReduceLambda(
+                    identifier1 = identifier1,
+                    identifier2 = identifier2,
+                    argumentValue1 = left.await().value,
+                    argumentValue2 = right.await().value,
+                    lambda = lambda,
+                    scopeVariables = scopeVariables,
+                )
+                require(result is Value.Number)
+                result
             }
         }
     }
@@ -391,6 +368,6 @@ private class InterpreterRun(
     sealed interface Value {
         data class Number(val value: Double) : Value
         data class Str(val value: String) : Value
-        data class Sequence(val start: Int, val end: Int) : Value
+        data class Sequence(val elements: List<Double>) : Value
     }
 }

@@ -27,3 +27,9 @@ It allows processing the input string lazily. For example, no need for [Lexer] t
 the input further if [Parser] has already found a syntax error.
 
 A short video is [here](https://drive.google.com/file/d/1S-oBfrBYh2xlr20MUO5_OSrGuB_ZuBrc/view?usp=sharing).
+
+UPDATE 2026.01.16:
+* Supported unary minuses as expressions;
+* Sequences are no more some abstract entities with min and max values but real lists of values;
+* Lambdas for reduction are now marked as associative if contain only + and *, and only in this cases I use concurrency, otherwise I use a non-concurrent fallback;
+* Fixed bugs in unit tests.

@@ -2,31 +2,51 @@ package com.viniarskii.jbtest.interpreter
 
 sealed interface Expression {
 
+    val isAssociative: Boolean
+
     data class Number(
         val value: Double
-    ) : Expression
+    ) : Expression {
+        override val isAssociative: Boolean = true
+    }
+
+    data class UnaryMinus(
+        val value: Expression
+    ): Expression {
+        override val isAssociative: Boolean = true
+    }
 
     data class Identifier(
         val name: String,
-        val unaryMinus: Boolean,
-    ) : Expression
+    ) : Expression {
+        override val isAssociative: Boolean = true
+    }
 
     data class BinaryOp(
         val left: Expression,
         val op: TokenType,
-        val right: Expression
-    ) : Expression
+        val right: Expression,
+    ) : Expression {
+        override val isAssociative: Boolean =
+            left.isAssociative && right.isAssociative && (
+                op == TokenType.PLUS || op == TokenType.MULTIPLY
+            )
+    }
 
     data class Sequence(
         val start: Expression,
         val end: Expression
-    ) : Expression
+    ) : Expression {
+        override val isAssociative: Boolean = true
+    }
 
     data class Map(
         val sequence: Expression,
         val param: String,
         val lambda: Expression
-    ) : Expression
+    ) : Expression {
+        override val isAssociative: Boolean = lambda.isAssociative
+    }
 
     data class Reduce(
         val sequence: Expression,
@@ -34,7 +54,9 @@ sealed interface Expression {
         val identifier1: String,
         val identifier2: String,
         val lambda: Expression
-    ) : Expression
+    ) : Expression {
+        override val isAssociative: Boolean = lambda.isAssociative
+    }
 }
 
 sealed interface Statement {
@@ -155,14 +177,10 @@ class ParserImpl : Parser {
         return when (token.type) {
             TokenType.MINUS -> {
                 consume()
-                if (peek()?.type == TokenType.T_IDENTIFIER) {
-                    Expression.Identifier(name = consume().value, unaryMinus = true)
-                } else {
-                    error("Unexpected token ${TokenType.MINUS.readableName} in expression")
-                }
+                Expression.UnaryMinus(value = parsePrimary())
             }
             TokenType.T_NUMBER -> Expression.Number(consume().value.toDouble())
-            TokenType.T_IDENTIFIER -> Expression.Identifier(name = consume().value, unaryMinus = false)
+            TokenType.T_IDENTIFIER -> Expression.Identifier(name = consume().value)
             TokenType.LPAREN -> {
                 consume()
                 val expression = parseAdditions()

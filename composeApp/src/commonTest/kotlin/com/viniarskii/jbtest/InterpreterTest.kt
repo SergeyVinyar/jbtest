@@ -40,23 +40,33 @@ class InterpreterTest {
     @Test
     fun sequenceVariableUnaryOperators() = doTest(
         input = """
-            var x = {1, 2}
+            var x = {1, 3}
             out -x
         """,
         expectedOutput = """
-            {-2, -1}
+            [-1.0, -2.0, -3.0]
         """
     )
 
-    // Not supported
-//    @Test
-//    fun expressionUnaryOperators() = doTest(
-//        input = """
-//            out -(1 + 2)
-//        """,
-//        expectedOutput = """
-//        """
-//    )
+    @Test
+    fun expressionUnaryOperators() = doTest(
+        input = """
+            out -(1 + 2)
+        """,
+        expectedOutput = """
+            -3.0
+        """
+    )
+
+    @Test
+    fun expressionUnaryOperatorsComplex() = doTest(
+        input = """
+            out -(8 + -3) * (-(1 + 3) * (-1))
+        """,
+        expectedOutput = """
+            -20.0
+        """
+    )
 
     @Test
     fun parenthesesAndFloatingPoint() {
@@ -77,7 +87,7 @@ class InterpreterTest {
                 out {1, 4}
             """,
             expectedOutput = """
-                {1, 4}
+                [1.0, 2.0, 3.0, 4.0]
             """
         )
     }
@@ -101,7 +111,7 @@ class InterpreterTest {
                 out map({1, 3}, i -> i^2)
             """,
             expectedOutput = """
-                {1, 9}
+                [1.0, 4.0, 9.0]
             """
         )
     }
@@ -113,7 +123,7 @@ class InterpreterTest {
                 out reduce({2, 4}, 1, x y -> x * y)
             """,
             expectedOutput = """
-                144.0
+                24.0
             """
         )
     }
@@ -125,7 +135,20 @@ class InterpreterTest {
                 out reduce({5, 7}, 0, a b -> a + b)
             """,
             expectedOutput = """
-                29.0
+                18.0
+            """
+        )
+    }
+
+    // reduce([25.0, 186.0, 301.0]) == 512.0
+    @Test
+    fun complexReductionSummation() {
+        doTest(
+            input = """
+                out reduce({5, 7}, 0, a b -> (a^2 + b) * b)
+            """,
+            expectedOutput = """
+                1.00336621E8
             """
         )
     }
@@ -137,7 +160,7 @@ class InterpreterTest {
                 out reduce(map({1, 3}, i -> i * 2), 0, x y -> x + y)
             """,
             expectedOutput = """
-                34.0
+                12.0
             """
         )
     }
@@ -149,7 +172,7 @@ class InterpreterTest {
                 out map(map({1, 2}, x -> x + 1), y -> y * 10)
             """,
             expectedOutput = """
-                {20, 30}
+                [20.0, 30.0]
             """
         )
     }
@@ -161,7 +184,7 @@ class InterpreterTest {
                 out map({1, 2}, i -> i + 5 * 2)
             """,
             expectedOutput = """
-                {11, 12}
+                [11.0, 12.0]
             """
         )
     }
@@ -171,18 +194,19 @@ class InterpreterTest {
         doTest(
             input = """
                 var x = 10
-                out map({1, 2}, x -> x + 1)
+                out map({1, 5}, x -> x + 1)
                 out x
             """,
             expectedOutput = """
-                {2, 3}
+                [2.0, 3.0, 4.0, 5.0, 6.0]
                 10.0
             """
         )
     }
 
-    // Fails. I think, the divide and conquer approach doesn't work for cases where
-    // parts cannot be merged by simply invoking the lambda over left and right results.
+    // Hmm. I think, this doesn't parse right because I mark lambdas as associative here
+    // whereas they are not. Maybe the logic for this flag calculation has to be trickier than
+    // just checking for operators.
 //    @Test
 //    fun nestedReductions() {
 //        doTest(
@@ -190,7 +214,6 @@ class InterpreterTest {
 //                out reduce({1, 2}, 0, a b -> a + reduce({1, b}, 0, x y -> x + y))
 //            """,
 //            expectedOutput = """
-//                4.0
 //            """
 //        )
 //    }
@@ -202,7 +225,7 @@ class InterpreterTest {
                 out reduce({1, 1000000}, 0, a b -> a + b)
             """,
             expectedOutput = """
-                1.0E12
+                5.000005E11
             """
         )
     }
@@ -211,11 +234,24 @@ class InterpreterTest {
     fun reductionNeutralElementAsVariable() {
         doTest(
             input = """
-                var neutral = 0
+                var neutral = 8
                 out reduce({1, 3}, neutral, x y -> x + y)
             """,
             expectedOutput = """
-                9.0
+                14.0
+            """
+        )
+    }
+
+    @Test
+    fun nonAssociativeReduction() {
+        doTest(
+            input = """
+                var neutral = 8
+                out reduce({1, 3}, neutral, x y -> x^y)
+            """,
+            expectedOutput = """
+                262144.0
             """
         )
     }
@@ -224,11 +260,11 @@ class InterpreterTest {
     fun variableInvisibleOutsideOfScope() {
         doTest(
             input = """
-                out map({1, 2}, i -> i + 1)
+                out map({1, 3}, i -> i^3)
                 out i
             """,
             expectedOutput = """
-                {2, 3}
+                [1.0, 8.0, 27.0]
                 Variable i not found
             """
         )
@@ -242,7 +278,7 @@ class InterpreterTest {
                 out reduce(map({1, n}, i -> i^2), 1, x y -> x * y)
             """,
             expectedOutput = """
-                1.46313216E10
+                36.0
             """
         )
     }
@@ -256,7 +292,7 @@ class InterpreterTest {
                 out {start, end}
             """,
             expectedOutput = """
-                {1, 3}
+                [1.0, 2.0, 3.0]
             """
         )
     }
@@ -285,22 +321,25 @@ class InterpreterTest {
         )
     }
 
-    // Fails because map always returns sequence which must have only integer values
-//    @Test
-//    fun piCalculation() {
-//        doTest(
-//            input = """
-//                var n = 500
-//                var sequence = map({0, n}, i -> (-1)^i / (2 * i + 1))
-//                var pi = 4 * reduce(sequence, 0, x y -> x + y)
-//                print "pi = "
-//                out pi
-//            """,
-//            expectedOutput = """
-//
-//            """
-//        )
-//    }
+    // Fails because of precision (n is relatively small).
+    // But making it larger makes the test executing too long (tests are single threaded).
+    // And also I've seen out-of-memory.
+    @Test
+    fun piCalculation() {
+        doTest(
+            input = """
+                var n = 500
+                var sequence = map({0, n}, i -> (-1)^i / (2 * i + 1))
+                var pi = 4 * reduce(sequence, 0, x y -> x + y)
+                print "pi = "
+                out pi
+            """,
+            expectedOutput = """
+                pi = 
+                3.141592653
+            """
+        )
+    }
 
     @OptIn(ExperimentalCoroutinesApi::class)
     private fun doTest(
